@@ -1,6 +1,12 @@
 """CLI runner to invoke migration scenarios."""
 import argparse
 import logging
+import sys
+from pathlib import Path
+
+# Add parent directory to path so we can import base
+sys.path.insert(0, str(Path(__file__).parent.parent))
+
 from config import MYSQL_CONFIG, POSTGRES_CONFIG
 from scenarios import CreateTablesScenario, FullMigrationScenario, SingleTableScenario, DeltaSyncScenario
 

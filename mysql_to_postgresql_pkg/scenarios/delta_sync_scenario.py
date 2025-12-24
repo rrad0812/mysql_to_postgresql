@@ -1,4 +1,4 @@
-from migration_manager import MigrationManager
+from mysql_to_postgresql_pkg.mysql_to_postgresql_manager import MySQLtoPostgreSQLMigrationManager
 
 
 class DeltaSyncScenario:
@@ -9,7 +9,7 @@ class DeltaSyncScenario:
     """
 
     def __init__(self, fetcher=None, writer=None, batch_size=None, threads=None):
-        self.manager = MigrationManager(fetcher, writer, batch_size=batch_size or 10000, threads=threads)
+        self.manager = MySQLtoPostgreSQLMigrationManager(fetcher, writer, batch_size=batch_size or 10000, threads=threads)
 
     def run(self, table_name=None, id_column="id"):
         self.manager.create_connections()
