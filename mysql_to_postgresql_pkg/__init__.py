@@ -3,6 +3,11 @@
 This package provides tools and utilities for migrating data from MySQL to PostgreSQL.
 """
 
+import sys
+from pathlib import Path
+# Add parent directory to path so we can import base
+sys.path.insert(0, str(Path(__file__).parent.parent))
+
 from base import MigrationManager, DataFetcher, DataWriter
 from mysql_to_postgresql_pkg.config import MYSQL_CONFIG, POSTGRES_CONFIG
 from mysql_to_postgresql_pkg.mysql_fetcher import MySQLFetcher

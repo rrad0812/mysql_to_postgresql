@@ -12,8 +12,7 @@ class DeltaSyncScenario:
         self.manager = MySQLtoPostgreSQLMigrationManager(fetcher, writer, batch_size=batch_size or 10000, threads=threads)
 
     def run(self, table_name=None, id_column="id"):
-        self.manager.create_connections()
-        try:
+        with self.manager:
             if table_name:
                 self.manager.migrate_missing_rows(table_name, id_column=id_column)
             else:
@@ -21,5 +20,3 @@ class DeltaSyncScenario:
                 tables = self.manager.fetcher.get_table_list()
                 for t in tables:
                     self.manager.migrate_missing_rows(t, id_column=id_column)
-        finally:
-            self.manager.close_connections()

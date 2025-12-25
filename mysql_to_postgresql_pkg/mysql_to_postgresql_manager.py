@@ -1,15 +1,21 @@
+import sys
+from pathlib import Path
+# Add parent directory to path so we can import base
+sys.path.insert(0, str(Path(__file__).parent.parent))
+
 import pymysql
 import psycopg2
 import pandas as pd
 import logging
-from psycopg2.extras import execute_values
-from psycopg2 import sql
+from typing import Optional
+from psycopg2.extensions import connection as PostgresConnection
 from concurrent.futures import ThreadPoolExecutor, as_completed
+# from ..base import MigrationManager
+from mysql_fetcher import MySQLFetcher
+from postgres_writer import PostgresWriter
+from mysql_postgres_mapping import transform_data_types
+from config import MYSQL_CONFIG, POSTGRES_CONFIG
 from base import MigrationManager
-from mysql_to_postgresql_pkg.mysql_fetcher import MySQLFetcher
-from mysql_to_postgresql_pkg.postgres_writer import PostgresWriter
-from mysql_to_postgresql_pkg.mysql_postgres_mapping import get_mysql_type_category, transform_data_types, map_mysql_to_postgres_type
-from mysql_to_postgresql_pkg.config import MYSQL_CONFIG, POSTGRES_CONFIG
 
 logger = logging.getLogger(__name__)
 
@@ -23,8 +29,8 @@ class MySQLtoPostgreSQLMigrationManager(MigrationManager):
         self.writer = writer or PostgresWriter()
         self.batch_size = batch_size
         self.threads = threads
-        self.mysql_conn = None
-        self.postgres_conn = None
+        self.mysql_conn: Optional[pymysql.Connection] = None
+        self.postgres_conn: Optional[PostgresConnection] = None
 
     def create_mysql_connection(self):
         """Create and return a MySQL connection."""
@@ -60,144 +66,13 @@ class MySQLtoPostgreSQLMigrationManager(MigrationManager):
         """Get complete table structure including columns, types, nullability, keys, etc."""
         return self.fetcher.get_table_structure(table_name)
 
-    def create_postgres_table(self, table_name):
-        """Create a PostgreSQL table based on MySQL table structure."""
-        columns, indexes = self.get_table_structure(table_name)
-        
-        # Build CREATE TABLE statement
-        col_definitions = []
-        primary_keys = []
-        unique_keys = {}
-        non_unique_keys = {}
-        
-        for col in columns:
-            col_name = col[0]
-            col_type = col[1]
-            is_nullable = col[2]
-            key = col[3]
-            default = col[4]
-            extra = col[5]
-            
-            # Map MySQL type to PostgreSQL type
-            pg_type = map_mysql_to_postgres_type(col_type)
-            
-            # Build column definition
-            col_def = f"{col_name} {pg_type}"
-            
-            # Handle auto_increment/serial
-            if "auto_increment" in str(extra).lower():
-                if "bigint" in col_type.lower():
-                    col_def = f"{col_name} BIGSERIAL"
-                else:
-                    col_def = f"{col_name} SERIAL"
-            
-            # Handle NOT NULL
-            if is_nullable == "NO" and "auto_increment" not in str(extra).lower():
-                col_def += " NOT NULL"
-            
-            # Handle default values
-            if default is not None and default != "NULL" and "auto_increment" not in str(extra).lower():
-                if "CURRENT_TIMESTAMP" in str(default).upper():
-                    col_def += " DEFAULT CURRENT_TIMESTAMP"
-                elif pg_type in ["INTEGER", "BIGINT", "SMALLINT", "REAL", "DOUBLE PRECISION"] or "NUMERIC" in pg_type:
-                    col_def += f" DEFAULT {default}"
-                elif pg_type == "BOOLEAN":
-                    col_def += f" DEFAULT {default}"
-                else:
-                    col_def += f" DEFAULT '{default}'"
-            
-            col_definitions.append(col_def)
-            
-            # Track primary key
-            if key == "PRI":
-                primary_keys.append(col_name)
-        
-        # Track unique keys from indexes
-        for idx in indexes:
-            key_name = idx[2]
-            column_name = idx[4]
-            non_unique = idx[1]
-            
-            if non_unique == 0 and key_name != "PRIMARY":
-                if key_name not in unique_keys:
-                    unique_keys[key_name] = []
-                unique_keys[key_name].append(column_name)
-            elif key_name != "PRIMARY":
-                # collect non-unique index columns to create regular indexes later
-                if key_name not in non_unique_keys:
-                    non_unique_keys[key_name] = []
-                non_unique_keys[key_name].append(column_name)
-        
-        # Add primary key constraint
-        if primary_keys:
-            col_definitions.append(f"PRIMARY KEY ({', '.join(primary_keys)})")
-        
-        # Add unique constraints
-        for key_name, columns in unique_keys.items():
-            col_definitions.append(f"UNIQUE ({', '.join(columns)})")
-        
-        # Create the table
-        create_table_sql = f"CREATE TABLE IF NOT EXISTS {table_name} (\n  {',\n  '.join(col_definitions)}\n);"
-        
-        try:
-            with self.postgres_conn.cursor() as cursor:
-                logger.info(f"Creating table: {table_name}")
-                cursor.execute(create_table_sql)
-                self.postgres_conn.commit()
-
-                # create non-unique indexes collected from MySQL SHOW INDEX
-                for key_name, cols in non_unique_keys.items():
-                    raw_idx_name = f"{table_name}_{key_name}_idx"
-                    idx_name = raw_idx_name[:63]
-                    try:
-                        cursor.execute(
-                            sql.SQL("CREATE INDEX IF NOT EXISTS {} ON {} ({})").format(
-                                sql.Identifier(idx_name),
-                                sql.Identifier(table_name),
-                                sql.SQL(', ').join([sql.Identifier(c) for c in cols])
-                            )
-                        )
-                        self.postgres_conn.commit()
-                        logger.info(f"Created index {idx_name} on {table_name}({', '.join(cols)})")
-                    except Exception as ie:
-                        self.postgres_conn.rollback()
-                        logger.error(f"Failed to create index {idx_name} on {table_name}: {ie}")
-                logger.info(f"Successfully created table: {table_name}")
-        except Exception as e:
-            self.postgres_conn.rollback()
-            logger.error(f"Error creating table {table_name}: {e}")
-            logger.error(f"SQL was: {create_table_sql}")
-            raise
-
     def create_tables(self):
         """Create all tables in PostgreSQL."""
         tables = self.get_table_list()
         for table in tables:
             logger.info(f"Creating table: {table}")
-            self.create_postgres_table(table)
-
-    def insert_into_postgres(self, df, table_name):
-        """Insert DataFrame into PostgreSQL using execute_values for efficiency."""
-        if df.empty:
-            logger.info(f"No data to insert for {table_name}")
-            return
-        
-        with self.postgres_conn.cursor() as cursor:
-            # Prepare column names and values
-            columns = ",".join(df.columns)
-            values = [tuple(row) for row in df.values]
-            
-            # Create insert query
-            insert_query = f"INSERT INTO {table_name} ({columns}) VALUES %s ON CONFLICT DO NOTHING;"
-            
-            try:
-                execute_values(cursor, insert_query, values)
-                self.postgres_conn.commit()
-                logger.info(f"Inserted {len(df)} rows into {table_name}")
-            except Exception as e:
-                self.postgres_conn.rollback()
-                logger.error(f"Error inserting into {table_name}: {e}")
-                raise
+            columns, indexes = self.get_table_structure(table)
+            self.writer.create_table(table, columns, indexes)
 
     def migrate_rows(self, table_name, rows):
         """Helper function to transform and insert rows into PostgreSQL."""
@@ -211,7 +86,7 @@ class MySQLtoPostgreSQLMigrationManager(MigrationManager):
         
         df = pd.DataFrame(rows, columns=column_names)
         df = transform_data_types(df, column_types)
-        self.insert_into_postgres(df, table_name)
+        self.writer.insert_into_table(df, table_name)
 
     def migrate_table(self, table_name):
         """Migrate a full table from MySQL to PostgreSQL."""
@@ -269,12 +144,11 @@ class MySQLtoPostgreSQLMigrationManager(MigrationManager):
                         df = pd.DataFrame(rows, columns=column_names)
                         df = transform_data_types(df, column_types)
                         
-                        with postgres_conn.cursor() as cursor:
-                            cols = ",".join(df.columns)
-                            values = [tuple(row) for row in df.values]
-                            insert_query = f"INSERT INTO {table_name} ({cols}) VALUES %s ON CONFLICT DO NOTHING;"
-                            execute_values(cursor, insert_query, values)
-                            postgres_conn.commit()
+                        # Use writer to insert data
+                        temp_writer = PostgresWriter()
+                        temp_writer.conn = postgres_conn
+                        temp_writer.insert_into_table(df, table_name)
+                        postgres_conn.commit()
                         
                         migrated_count += len(rows)
                     except Exception as e:
@@ -310,6 +184,11 @@ class MySQLtoPostgreSQLMigrationManager(MigrationManager):
 
     def get_missing_ids(self, table_name, id_column="id"):
         """Find IDs present in MySQL but missing in PostgreSQL."""
+        if not self.mysql_conn:
+            raise RuntimeError("MySQL connection not established")
+        if not self.postgres_conn:
+            raise RuntimeError("PostgreSQL connection not established")
+        
         # Get all IDs from MySQL
         with self.mysql_conn.cursor() as cursor:
             cursor.execute(f"SELECT {id_column} FROM {table_name};")
@@ -329,6 +208,9 @@ class MySQLtoPostgreSQLMigrationManager(MigrationManager):
         """Fetch specific rows from MySQL by their IDs."""
         if not id_list:
             return []
+        
+        if not self.mysql_conn:
+            raise RuntimeError("MySQL connection not established")
         
         with self.mysql_conn.cursor() as cursor:
             placeholders = ",".join(["%s"] * len(id_list))
@@ -380,12 +262,11 @@ class MySQLtoPostgreSQLMigrationManager(MigrationManager):
                 df = pd.DataFrame(rows, columns=column_names)
                 df = transform_data_types(df, column_types)
                 
-                with postgres_conn.cursor() as cursor:
-                    cols = ",".join(df.columns)
-                    values = [tuple(row) for row in df.values]
-                    insert_query = f"INSERT INTO {table_name} ({cols}) VALUES %s ON CONFLICT DO NOTHING;"
-                    execute_values(cursor, insert_query, values)
-                    postgres_conn.commit()
+                # Use writer to insert data
+                temp_writer = PostgresWriter()
+                temp_writer.conn = postgres_conn
+                temp_writer.insert_into_table(df, table_name)
+                postgres_conn.commit()
                 
                 return f"Migrated {len(batch_ids)} rows from {table_name}"
             except Exception as e:
@@ -419,6 +300,9 @@ class MySQLtoPostgreSQLMigrationManager(MigrationManager):
             except Exception as e:
                 logger.error(f"Could not create postgres connection for get_primary_key: {e}")
                 return []
+        
+        if not self.postgres_conn:
+            return []
 
         with self.postgres_conn.cursor() as cursor:
             cursor.execute(query, (table_name,))
@@ -436,6 +320,9 @@ class MySQLtoPostgreSQLMigrationManager(MigrationManager):
                 except Exception as e:
                     logger.error(f"Could not create postgres connection for update_sequence: {e}")
                     return
+            
+            if not self.postgres_conn:
+                return
 
             try:
                 with self.postgres_conn.cursor() as cursor:
@@ -446,10 +333,11 @@ class MySQLtoPostgreSQLMigrationManager(MigrationManager):
                     self.postgres_conn.commit()
                     logger.info(f"Sequence updated for {table_name}.{pk_column}")
             except Exception as e:
-                try:
-                    self.postgres_conn.rollback()
-                except Exception:
-                    pass
+                if self.postgres_conn:
+                    try:
+                        self.postgres_conn.rollback()
+                    except Exception:
+                        pass
                 logger.error(f"Failed to update sequence for {table_name}.{pk_column}: {e}")
 
     def update_all_sequences(self):
@@ -460,7 +348,11 @@ class MySQLtoPostgreSQLMigrationManager(MigrationManager):
                 self.update_sequence(table_name)
             except Exception as e:
                 logger.error(f"Failed to update sequence for {table_name}: {e}")
-                self.postgres_conn.rollback()
+                if self.postgres_conn:
+                    try:
+                        self.postgres_conn.rollback()
+                    except Exception:
+                        pass
 
     def full_migration(self):
         """Complete migration: create tables, migrate data, update sequences."""

@@ -1,9 +1,16 @@
+import sys
+from pathlib import Path
+# Add parent directory to path so we can import base
+sys.path.insert(0, str(Path(__file__).parent.parent))
+
 from base import DataWriter
 import psycopg2
 from psycopg2.extras import execute_values
 from psycopg2 import sql
-from mysql_to_postgresql_pkg.config import POSTGRES_CONFIG
-from mysql_to_postgresql_pkg.mysql_postgres_mapping import map_mysql_to_postgres_type
+from psycopg2.extensions import connection as PostgresConnection
+from typing import Optional, Any
+from config import POSTGRES_CONFIG
+from mysql_postgres_mapping import map_mysql_to_postgres_type
 import logging
 
 logger = logging.getLogger(__name__)
@@ -11,7 +18,7 @@ logger = logging.getLogger(__name__)
 
 class PostgresWriter(DataWriter):
     def __init__(self):
-        self.conn = None
+        self.conn: Optional[PostgresConnection] = None
 
     def connect(self):
         """Create and return a PostgreSQL connection."""
@@ -23,18 +30,8 @@ class PostgresWriter(DataWriter):
             self.conn.close()
             self.conn = None
 
-    def create_table(self, table_name, mysql_conn):
-        """Create a PostgreSQL table based on MySQL table structure."""
-        # Get table structure from MySQL
-        with mysql_conn.cursor() as cursor:
-            # Get column information
-            cursor.execute(f"DESCRIBE {table_name};")
-            columns = cursor.fetchall()
-            
-            # Get indexes and keys
-            cursor.execute(f"SHOW INDEX FROM {table_name};")
-            indexes = cursor.fetchall()
-        
+    def create_table(self, table_name: str, columns: tuple, indexes: tuple) -> None:
+        """Create a PostgreSQL table based on provided table structure."""
         # Build CREATE TABLE statement
         col_definitions = []
         primary_keys = []
@@ -104,11 +101,14 @@ class PostgresWriter(DataWriter):
             col_definitions.append(f"PRIMARY KEY ({', '.join(primary_keys)})")
         
         # Add unique constraints
-        for key_name, columns in unique_keys.items():
-            col_definitions.append(f"UNIQUE ({', '.join(columns)})")
+        for key_name, cols in unique_keys.items():
+            col_definitions.append(f"UNIQUE ({', '.join(cols)})")
         
         # Create the table
         create_table_sql = f"CREATE TABLE IF NOT EXISTS {table_name} (\n  {',\n  '.join(col_definitions)}\n);"
+        
+        if not self.conn:
+            raise RuntimeError("PostgreSQL connection not established")
         
         try:
             with self.conn.cursor() as cursor:
@@ -131,20 +131,25 @@ class PostgresWriter(DataWriter):
                         self.conn.commit()
                         logger.info(f"Created index {idx_name} on {table_name}({', '.join(cols)})")
                     except Exception as ie:
-                        self.conn.rollback()
+                        if self.conn:
+                            self.conn.rollback()
                         logger.error(f"Failed to create index {idx_name} on {table_name}: {ie}")
                 logger.info(f"Successfully created table: {table_name}")
         except Exception as e:
-            self.conn.rollback()
+            if self.conn:
+                self.conn.rollback()
             logger.error(f"Error creating table {table_name}: {e}")
             logger.error(f"SQL was: {create_table_sql}")
             raise
 
-    def insert_rows(self, df, table_name):
+    def insert_into_table(self, df, table_name: str) -> None:
         """Insert DataFrame into PostgreSQL using execute_values for efficiency."""
         if df.empty:
             logger.info(f"No data to insert for {table_name}")
             return
+        
+        if not self.conn:
+            raise RuntimeError("PostgreSQL connection not established")
         
         with self.conn.cursor() as cursor:
             # Prepare column names and values
@@ -159,7 +164,8 @@ class PostgresWriter(DataWriter):
                 self.conn.commit()
                 logger.info(f"Inserted {len(df)} rows into {table_name}")
             except Exception as e:
-                self.conn.rollback()
+                if self.conn:
+                    self.conn.rollback()
                 logger.error(f"Error inserting into {table_name}: {e}")
                 raise
 

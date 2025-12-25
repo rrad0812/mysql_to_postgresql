@@ -8,8 +8,5 @@ class CreateTablesScenario:
         self.manager = MySQLtoPostgreSQLMigrationManager(fetcher, writer)
 
     def run(self):
-        self.manager.create_connections()
-        try:
+        with self.manager:
             self.manager.create_tables()
-        finally:
-            self.manager.close_connections()

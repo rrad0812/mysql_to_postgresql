@@ -1,32 +1,28 @@
 
-# MySQL to PostgreSQL migration tool
+# Migracija baze podataka na drugi tip baze podataka
 
-Ovaj projekat omogućava migraciju podataka sa MySQL na PostgreSQL bazu podataka.
+Ovaj projekat omogućava migraciju podataka sa jednog tipa baze podataka ( MySQL ) na drugi tip baze podataka ( PostgreSQL ).
 
-## 📚 Dokumentacija
-
-- **[README.md](README.md)** - Osnovna dokumentacija i upotreba
-- **[ARCHITECTURE.md](ARCHITECTURE.md)** - Arhitektura i dizajn projekta
-- **[EXTENDING.md](EXTENDING.md)** - Kako dodati nove tipove migracija (MSSQL, Oracle, CSV, itd.)
-
-## Struktura Projekta
+## Struktura projekta
 
 Projekat je organizovan kao modularni Python paket koji omogućava lako dodavanje novih tipova migracija:
 
 ```sh
-mysql_to_postgresql/
+transfer_db1_to_db2/
+├── ARCHITECTURE.md
+├── EXTENDING.md
 ├── README.md
-├── requirements.txt
-├── setup.py
 ├── base.py                        # ⭐ Zajedničke apstraktne bazne klase
-├── runner.py                      # CLI entry point za MySQL → PostgreSQL
 └── mysql_to_postgresql_pkg/       # MySQL → PostgreSQL implementacija
     ├── __init__.py
     ├── config.py                  # Konfiguracija iz env varijabli
     ├── mysql_fetcher.py           # MySQL data fetcher
     ├── postgres_writer.py         # PostgreSQL writer
+    ├── requirements.txt
     ├── mysql_postgres_mapping.py  # Mapiranje tipova
     ├── mysql_to_postgresql_manager.py  # Migration manager
+    ├── runner.py                      # CLI entry point za MySQL → PostgreSQL
+    ├── setup.py
     └── scenarios/                 # Migration scenariji
         ├── __init__.py
         ├── create_tables_scenario.py

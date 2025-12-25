@@ -3,20 +3,20 @@ import os
 
 # MySQL / pymysql connection keys
 MYSQL_CONFIG = {
-    "host": os.getenv("MYSQL_HOST", "localhost"),
-    "port": int(os.getenv("MYSQL_PORT", "3306")) if os.getenv("MYSQL_PORT") else None,
+    "host": os.getenv("MYSQL_HOST", "172.17.0.2"),
+    "port": int(os.getenv("MYSQL_PORT", "3306")),
     "user": os.getenv("MYSQL_USER", "root"),
-    "password": os.getenv("MYSQL_PASSWORD", ""),
-    "db": os.getenv("MYSQL_DATABASE", os.getenv("MYSQL_DB", "")),
+    "password": os.getenv("MYSQL_PASSWORD", "rrad0812"),
+    "db": os.getenv("MYSQL_DB", "def"),
 }
 
 # PostgreSQL / psycopg2 connection keys
 POSTGRES_CONFIG = {
-    "host": os.getenv("POSTGRES_HOST", "localhost"),
-    "port": int(os.getenv("POSTGRES_PORT", "5432")) if os.getenv("POSTGRES_PORT") else None,
+    "host": os.getenv("POSTGRES_HOST", "172.17.0.4"),
+    "port": int(os.getenv("POSTGRES_PORT", "5432")),
     "user": os.getenv("POSTGRES_USER", "postgres"),
-    "password": os.getenv("POSTGRES_PASSWORD", ""),
-    "dbname": os.getenv("POSTGRES_DB", os.getenv("POSTGRES_DATABASE", "")),
+    "password": os.getenv("POSTGRES_PASSWORD", "rrad0812"),
+    "dbname": os.getenv("POSTGRES_DB", "def"),
 }
 
 def _clean(config):

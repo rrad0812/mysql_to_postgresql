@@ -9,8 +9,5 @@ class SingleTableScenario:
         self.manager = MySQLtoPostgreSQLMigrationManager(fetcher, writer, batch_size=batch_size or 10000, threads=threads)
 
     def run(self):
-        self.manager.create_connections()
-        try:
+        with self.manager:
             self.manager.migrate_table(self.table_name)
-        finally:
-            self.manager.close_connections()
