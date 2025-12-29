@@ -8,20 +8,27 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from config import MYSQL_CONFIG, POSTGRES_CONFIG
-from scenarios import CreateTablesScenario, FullMigrationScenario, SingleTableScenario, DeltaSyncScenario
+from mysql_to_postgresql_manager import (
+    MySQLtoPostgreSQLCreateTablesManager,
+    MySQLtoPostgreSQLFullMigrationManager,
+    MySQLtoPostgreSQLSingleTableManager,
+    MySQLtoPostgreSQLDeltaSyncManager
+)
 
 logger = logging.getLogger(__name__)
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Run migration scenarios")
+    parser = argparse.ArgumentParser(description="Run MySQL to PostgreSQL migration")
     parser.add_argument("scenario", nargs="?", choices=["create-tables", "full", "single", "delta"],
-                        help="Scenario to run")
+                        help="Migration scenario to run")
     parser.add_argument("--table", help="Table name for single/delta scenarios")
     parser.add_argument("--id-column", default="id", help="ID column for delta sync")
     parser.add_argument("--dry-run", action="store_true", help="Don't connect to DB; just print actions")
     parser.add_argument("--config-preview", action="store_true", help="Print resolved DB config and exit")
-    parser.add_argument("--threads", type=int, default=None, help="Number of threads for parallel migration")
+    parser.add_argument("--threads", type=int, default=4, help="Number of threads for parallel migration")
+    parser.add_argument("--batch-size", type=int, default=10000, help="Batch size for data migration")
+    parser.add_argument("--parallel", action="store_true", help="Use parallel migration within tables")
     args = parser.parse_args()
 
     if args.config_preview:
@@ -39,25 +46,52 @@ def main():
         print(f"DRY RUN: would execute scenario '{args.scenario}'")
         if args.scenario == "single":
             print(f"Would migrate single table: {args.table}")
+        elif args.scenario == "delta":
+            if args.table:
+                print(f"Would delta sync table: {args.table}")
+            else:
+                print("Would delta sync all tables")
         return
 
     # Real execution
     logging.basicConfig(level=logging.INFO)
 
     if args.scenario == "create-tables":
-        s = CreateTablesScenario()
-        s.run()
+        manager = MySQLtoPostgreSQLCreateTablesManager()
+        with manager:
+            manager.run()
+            
     elif args.scenario == "full":
-        s = FullMigrationScenario(threads=args.threads)
-        s.run()
+        manager = MySQLtoPostgreSQLFullMigrationManager(
+            batch_size=args.batch_size,
+            threads=args.threads,
+            parallel=args.parallel
+        )
+        with manager:
+            manager.run()
+            
     elif args.scenario == "single":
         if not args.table:
             raise SystemExit("--table is required for 'single' scenario")
-        s = SingleTableScenario(args.table, threads=args.threads)
-        s.run()
+        manager = MySQLtoPostgreSQLSingleTableManager(
+            table_name=args.table,
+            batch_size=args.batch_size,
+            threads=args.threads,
+            parallel=args.parallel
+        )
+        with manager:
+            manager.run()
+            
     elif args.scenario == "delta":
-        s = DeltaSyncScenario(threads=args.threads)
-        s.run(table_name=args.table, id_column=args.id_column)
+        manager = MySQLtoPostgreSQLDeltaSyncManager(
+            table_name=args.table,  # None for all tables
+            id_column=args.id_column,
+            batch_size=args.batch_size,
+            threads=args.threads,
+            parallel=args.parallel
+        )
+        with manager:
+            manager.run()
 
 
 if __name__ == "__main__":

@@ -12,7 +12,13 @@ from base import MigrationManager, DataFetcher, DataWriter
 from mysql_to_postgresql_pkg.config import MYSQL_CONFIG, POSTGRES_CONFIG
 from mysql_to_postgresql_pkg.mysql_fetcher import MySQLFetcher
 from mysql_to_postgresql_pkg.postgres_writer import PostgresWriter
-from mysql_to_postgresql_pkg.mysql_to_postgresql_manager import MySQLtoPostgreSQLMigrationManager
+from mysql_to_postgresql_pkg.mysql_to_postgresql_manager import (
+    MySQLtoPostgreSQLBaseManager,
+    MySQLtoPostgreSQLCreateTablesManager,
+    MySQLtoPostgreSQLSingleTableManager,
+    MySQLtoPostgreSQLFullMigrationManager,
+    MySQLtoPostgreSQLDeltaSyncManager,
+)
 from mysql_to_postgresql_pkg.mysql_postgres_mapping import (
     map_mysql_to_postgres_type,
     get_mysql_type_category,
@@ -20,14 +26,25 @@ from mysql_to_postgresql_pkg.mysql_postgres_mapping import (
 )
 
 __all__ = [
+    # Base classes
     "MigrationManager",
     "DataFetcher", 
     "DataWriter",
+    # Config
     "MYSQL_CONFIG",
     "POSTGRES_CONFIG",
+    # Fetcher and Writer
     "MySQLFetcher",
     "PostgresWriter",
+    # Managers - recommended
+    "MySQLtoPostgreSQLBaseManager",
+    "MySQLtoPostgreSQLCreateTablesManager",
+    "MySQLtoPostgreSQLSingleTableManager",
+    "MySQLtoPostgreSQLFullMigrationManager",
+    "MySQLtoPostgreSQLDeltaSyncManager",
+    # Deprecated
     "MySQLtoPostgreSQLMigrationManager",
+    # Mapping functions
     "map_mysql_to_postgres_type",
     "get_mysql_type_category",
     "transform_data_types",
